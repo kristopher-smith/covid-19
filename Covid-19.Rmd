@@ -1,0 +1,579 @@
+---
+title: "Covid-19 Global, US, and State Trends"
+author: "K.Smith"
+date: "1/30/2022"
+output:
+  pdf_document: default
+  html_document: default
+---
+
+```{r setup, include=FALSE}
+knitr::opts_chunk$set(echo = TRUE)
+```
+
+# Is the Covid-19 Virus Becoming Less Deadly?
+
+
+## Goals
+
+* Analyze recent Covid-19 cases and death's data from recent years to present.
+  * Look at global, US, and individual states.  
+* Find reliable, current sources for data through scraping (scraping allows realtime results).
+  * Search open research forums and maybe see which organizations are cited more frequently.
+* Look for any notable trends either way and present them.
+    * Transform, clean, and tidy the data.
+    * Build models, charts and graphs.
+
+
+
+```{r import_packages, message=FALSE}
+# import necessary packages
+library(tidyselect)
+library(tidyverse)
+library(tidyr)
+library(lubridate)
+library(dplyr)
+library(ggplot2)
+```
+
+
+
+## Data Sourcing
+
+* The Data for this analysis was scraped from the Johns Hopkins research centers public data repository. It seemed to be a very reliable source and they update it daily so it is extremely relevant.
+* It can be found for download [here](https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data/csse_covid_19_time_series).
+* Or copy and paste this link into your browser <https://github.com/CSSEGISandData/COVID-19/tree/master/csse_covid_19_data/csse_covid_19_time_series>.
+
+
+```{r get_jhu_data}
+
+## Get Data needed by scraping the current, raw data from Johns Hopkins Github Repository
+url_in <- ("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/master/csse_covid_19_data/csse_covid_19_time_series/")
+
+## We will be using several sources of raw data but they all start with the same beginning url link. So we can create a vector of different link endings for each data set to reference later
+file_names <- c("time_series_covid19_confirmed_US.csv",
+                "time_series_covid19_deaths_US.csv",
+                "time_series_covid19_confirmed_global.csv",
+                "time_series_covid19_deaths_global.csv")
+
+## Concantenate them together and store them in a vector of string variables
+urls <- str_c(url_in, file_names)
+```
+
+## Gather, Clean, Tidy, and Transform Data
+
+
+### Global Data
+
+```{r import_data_global}
+
+## Read data into a DataFrame from files in urls
+global_cases  <- read.csv(urls[3])
+global_deaths <- read.csv(urls[4])
+
+## Preview dataframes column names:
+names(global_cases[1:6])
+```
+
+* It looks as if the individual dates are presented as a single column each. They are also of a type that we are not interested in working with (no offense to int's). 
+* In order to analyze changes over time we are going to have to transform these datasets. If we would like to see counts per date so we can answer some questions, then each date will be a single observation. 
+* This means we must arrange the data so that each 'row' is a single day and the variables ('columns') are either discarded if they offer no help with our analysis or transformed into usefull versions of themselves or combined with other variables to achieve this result.
+
+
+
+
+```{r tidy_global_data}
+
+## Transfrom global cases Dataframe
+global_cases <- global_cases %>%
+  pivot_longer(cols = -c('Province.State',
+                         'Country.Region', Lat, Long),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(-c(Lat, Long))
+
+## Transfrom global deaths Dataframe
+global_deaths <- global_deaths %>%
+  pivot_longer(cols = -c('Province.State',
+                         'Country.Region', Lat, Long),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(-c(Lat, Long))
+
+## Join the two together to make a Global DataFrame
+global <- global_cases %>% 
+  full_join(global_deaths)
+
+## Rename columns
+global <- global %>%
+  rename("Country_Region" = 'Country.Region',
+         "Province_State" = 'Province.State')
+
+
+## Reformat the date column
+
+### Drop the "X" off the front of every date string
+global$date <- substring(global$date, 2)
+
+### Convert them all to datetime objects and format to MDY
+global <- global %>%
+  mutate(date = mdy(date))
+
+## Remove zero cases to shrink our data set a bit.
+global <- global %>% filter(cases > 0)
+summary(global)
+```
+
+### US Data
+
+* Above we can see that removing rows with 0 values in them cleans our data up quite a bit.
+* For this analysis this is going to be fine, but many times you would not want to remove 0 values so quickly without thinking about what consequences this will have on your analysis.
+* Now we will repeat our previous import, clean, and tidy process from the global data with the US datasets.
+
+
+```{r import_data_US}
+
+## Create DataFrame from first file in urls
+US_cases      <- read_csv(urls[1])
+US_deaths     <- read.csv(urls[2])
+
+## Now let's repeat our previous tidy with global over the US datasets
+
+## Preview DataFrames
+#US_cases
+#US_deaths
+
+## Lets transform our US_cases to look more like our US_deaths so we may join them
+
+## Pivot on date with cases as counter, Format date from chr to datetime
+US_cases <- US_cases  %>% 
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "cases") %>%
+  select(Admin2:cases) %>%
+  mutate(date = mdy(date)) %>%
+  select(-c(Lat, Long_))
+
+US_deaths <- US_deaths  %>% 
+  pivot_longer(cols = -(UID:Combined_Key),
+               names_to = "date",
+               values_to = "deaths") %>%
+  select(Admin2:deaths) %>%
+  select(-c(Lat, Long_))
+
+## Reformat the date column
+
+### Drop the "X" off the front of every date string
+US_deaths$date <- substring(US_deaths$date, 2)
+#US_deaths
+
+### Convert them all to datetime objects and format to MDY
+US_deaths <- US_deaths %>%
+  mutate(date = mdy(date))
+#US_deaths
+
+## We have transformed our US_cases dataframe to look like our US_deaths so we can join them
+US <- US_cases %>%
+  full_join(US_deaths)
+#US
+## Lets get rid of rows where cases are 0
+US <- US %>% filter(cases > 0)
+sample_n(US, 10)
+```
+
+
+* If we are interested in finding out rates per-capita and similar variables that require population data, then we must add this to our data as it doesn't include it. Luckily there is a population look up table with country keys we can scrape and join with our current datasets.  
+
+
+```{r global_population}
+
+## Create a Combined Key variable in our global dataset to match our US
+global <- global %>%
+  unite("Combined_Key",
+        c(Province_State, Country_Region),
+        sep = ', ',
+        na.rm = TRUE,
+        remove = FALSE)
+
+## Source our population data:
+uid_lookup_url <- c("https://raw.githubusercontent.com/CSSEGISandData/COVID-19/",
+                    "master/csse_covid_19_data/UID_ISO_FIPS_LookUp_Table.csv")
+uid_lookup_url <- str_c(uid_lookup_url[1], uid_lookup_url[2])
+
+## Read in URL
+uid <- read_csv(uid_lookup_url) %>%
+  select(-c(Lat, Long_, code3, iso2, iso3, Admin2, UID, FIPS))
+sample_n(uid, 10)
+
+## Join with our global dataset
+global <- global %>%
+  right_join(uid, by = c("Province_State", "Country_Region", "Combined_Key")) %>%
+  select(Province_State, Country_Region, date,
+         cases, deaths, Population,
+         Combined_Key)
+## Lets see what we have so far:
+sample_n(global, 10)
+summary(global)
+
+```
+
+
+### Before we continue we have to do something with our na values in the data so it does not effect our analysis.
+
+
+
+```{r remove_na}
+
+## Oh dear it looks as though we have some na values to remove so lets take care of that:
+global <- na.omit(global)
+#summary(global)
+
+## Join with our US dataset
+US <- US %>%
+  right_join(uid, by = c("Province_State", "Country_Region", "Combined_Key")) %>%
+  select(Province_State, Country_Region, date,
+         cases, deaths, Population,
+         Combined_Key)
+
+## Lets see what we have so far:
+#sample_n(US, 10)
+#tail(US)
+
+## Some na values here as well to remove so lets take care of that
+US <- na.omit(US)
+#tail(US)
+sample_n(US, 10)
+
+```
+
+
+## Visualizations
+
+* Ok we have scraped and wrangled, cleaned and tidied, transformed and merged...I think it is high time we build some visualizations!
+
+
+```{r visualizations_US}
+
+## Lets start in the US by state
+US_by_state <- US %>%
+  group_by(Province_State, Country_Region, date) %>%
+  select(Country_Region, Province_State, date,
+         cases, deaths, Population) %>%
+  ungroup()
+
+## A US totals
+US_totals <- US_by_state %>%
+  group_by(Country_Region, date) %>%
+  summarize(cases = sum(cases), deaths = sum(deaths),
+            Population = sum(Population)) %>%
+  select(Country_Region, date,
+         cases, deaths, Population) %>%
+  ungroup()
+## Create a new column variable for deaths per million
+US_totals$deaths_per_mill <- US_totals$deaths*1000000
+US_totals$deaths_per_mill <- round(US_totals$deaths_per_mill / US_totals$Population)
+#sample_n(US_by_state, 10)
+tail(US_totals)
+
+## Create a new column variable for proportion of deaths to cases
+US_totals$death_rate_percent <- round((US_totals$deaths / US_totals$cases)*100, digits=2)
+sample_n(US_totals, 100)
+
+## First visualization
+US_totals %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 Total's US", y = NULL)
+
+```
+
+
+* We can also single out a state of interest and do the same, I picked Washington because that is where I currently live. You can insert any state that may interest you.
+
+
+
+```{r visualizations_state}
+
+## Pick a state to analyze
+
+state_of_interest <- "Washington"
+state <- state_of_interest
+US_by_state %>%
+  filter(Province_State == state) %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID-19 Trends in ", state), y = NULL)
+
+```
+
+
+
+* At the time of this analysis there is a spike in cases and we can see that infections continue to gain in numbers.
+* It is worth noting that although the cases are rising the death's seem to be rising as well but at a slower rate than case's. 
+* One could make the argument that the virus is becoming less fatal.
+* This could be for many reasons, vaccination status of the public, the virus becoming less fatal on it's own etc.
+* If we really wanted to accentuate this fact we could recreate the same plot with death's as a baseline:
+
+
+
+```{r less_fatal_}
+
+state <- state_of_interest
+US_by_state %>%
+  filter(Province_State == state) %>%
+  filter(cases > 0) %>%
+  ggplot(aes(x = date, y = cases)) +
+  geom_line(aes(color = "cases")) +
+  geom_point(aes(color = "cases")) +
+  geom_line(aes(y = deaths, color = "deaths")) +
+  geom_point(aes(y = deaths, color = "deaths")) +
+  scale_y_continuous() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID-19 Trends in ", state), y = NULL)
+
+```
+
+* If we use death's as a baseline we can see the divergence much more pronounced between case's and death's.
+* I am not sure how I feel about this. If I was trying to prove that the virus was becoming less deadly for some reason I would choose this plot.
+* I am not sure if this is a more bias plot than the logarithm plot. I will leave it to the reader to decide, but I thought it was important to include both to underline the power we have as data scientist's to tell a narrative.
+* At the time of this analysis there is a global and local spike in cases (2-7-2022). I provided some code below to check what date is the most recent in the dataset.
+
+```{r date_check}
+
+## If you want to see how current your data is:
+current_date <- max(US_by_state$date)
+current_date <- paste("Data is thru:", current_date)
+
+## Total number of cases up to date
+cases_to_date <- (max(US_totals$cases)/1000000)
+cases_to_date <- round(cases_to_date, digits = 1)
+cases_to_date <- paste("Current Total Case Count:", cases_to_date, "million cases")
+
+## Total number of deaths up to date
+deaths_to_date <- max(US_totals$deaths)
+
+deaths_to_date <- (max(US_totals$deaths)/1000000)
+deaths_to_date <- round(deaths_to_date, digits = 1)
+deaths_to_date <- paste("Current Total Death Count:", deaths_to_date, "million cases")
+
+current_date; cases_to_date; deaths_to_date;
+```
+### Creating variables to measure new cases and new deaths.
+
+```{r visualizations_state_new_cases}
+
+## We are going to add some more variables to answer more questions about the data
+
+US_by_state <- US_by_state %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+
+US_totals <- US_totals %>%
+  mutate(new_cases = cases - lag(cases),
+         new_deaths = deaths - lag(deaths))
+tail(US_totals %>% select(new_cases, new_deaths, everything()))
+
+## Now that we have created variables for our new deaths and cases, lets visualize them
+US_totals %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = "COVID19 in US", y = NULL)
+```
+
+* We can see that when the pandemic began, we were at exponential growth when looking at total cases, or total
+deaths. 
+* This is not an effective way to communicate data which is changing extremely rapidly. 
+*Because of our ability to test for and even diagnose this virus you can see that early on the numbers were growing at exponential rates.
+* This was in part due simply because of our methods for counting and measuring these things were adapting and spreading until they were 
+adopted in enough countries throughout the world to give more accurate measurements. 
+* This is why it is important to measure "new cases" and "new deaths" and proportion measurements as opposed to totals.
+
+
+### We can do the same for state level data with new cases and new deaths:
+
+```{r plotting_new_cases_state}
+## Pick a state to analyze
+state <- "Washington"
+US_by_state %>%
+  filter(Province_State == state) %>%
+  ggplot(aes(x = date, y = new_cases)) +
+  geom_line(aes(color = "new_cases")) +
+  geom_point(aes(color = "new_cases")) +
+  geom_line(aes(y = new_deaths, color = "new_deaths")) +
+  geom_point(aes(y = new_deaths, color = "new_deaths")) +
+  scale_y_log10() +
+  theme(legend.position = "bottom",
+        axis.text.x = element_text(angle = 90)) +
+  labs(title = str_c("COVID-19 New Cases in ", state), y = NULL)
+
+```
+
+
+* Try different states yourself and compare. 
+*But what if we wanted to find the worst and best states? 
+* How would we even decide this?
+* Intuition would tell us that cases and deaths might be somewhat a function of population. 
+* Without proving this yet we can just filter states with the highest and lowest rates of cases and deaths per thousand.
+
+
+
+```{r states}
+US_state_totals <- US_by_state %>%
+  group_by(Province_State) %>%
+  summarize(deaths = max(deaths), cases = max(cases),
+            population = max(Population),
+            cases_per_thou = 1000 * cases / population,
+            deaths_per_thou = 1000 * deaths / population) %>%
+  filter(cases > 0, population > 0)
+
+#US_state_totals    # Preview
+
+## Best ten states with lowest rates
+US_state_totals %>%
+  slice_min(deaths_per_thou, n = 10) %>%
+  select(deaths_per_thou, cases_per_thou, everything())
+
+## Worst ten states with highest rates
+US_state_totals %>%
+  slice_max(deaths_per_thou, n = 10) %>%
+  select(deaths_per_thou, cases_per_thou, everything())
+```
+## Modelling
+
+* Without getting too far into how accurate this data is and how it is reported (which are very important), 
+I would like to start with some very simple modelling of this data as it sits without adding any extra variables
+at this time.
+* If we wanted to try to predict say a states deaths per thousand based off from another variable, what would that look like?
+
+```{r modeling}
+
+# Turn off scientific notation globally for outputs to be full decimal form
+options(scipen = 999)
+
+## Lets just look at deaths per thousand as a function of cases per thousand
+mod <- lm(deaths_per_thou ~ cases_per_thou, data = US_state_totals)
+summary(mod)
+
+```
+* We can see that the mean for deaths per thousand is our Beta_0 (Intercept). And our Beta_1 (cases_per_thousand) tells us for every case we have that many deaths.
+
+```{r plot_model_1}
+## Lets continue our modelling.
+## I want to define our lower and upper bounds:
+lower <- US_state_totals %>% 
+  slice_min(cases_per_thou) 
+lower  ## 122 at the time of this analysis
+upper <- US_state_totals %>% 
+  slice_max(cases_per_thou)
+upper   ## 416 at the time of this analysis
+
+## Add a column of predictions from the model in our US state totals dataframe: (at this time our model is 
+# predicting deaths per thousand using just one independent variable =cases_per_thou)
+US_state_totals<- US_state_totals %>% 
+  mutate(pred = predict(mod))
+
+## Lets plot out our predictions against actual values and see how it looks
+US_state_totals %>% ggplot() +
+  geom_point(aes(x = cases_per_thou, y = deaths_per_thou), color = "blue") + # Actual values in blue
+  geom_point(aes(x = cases_per_thou, y = pred), color = "red") # Predicted values in red
+
+```
+
+
+
+* Our model does not look very flexible as it sits.
+* Let's try a population as our predicting variable.
+
+
+```{r modeling_2}
+mod2 <- lm(deaths_per_thou ~ population, data = US_state_totals)
+summary(mod2)
+```
+* Using population as our predictor variable gives a higher error and a lower $R^2$ value.
+* And if we plot it:
+```{r plot_model_2}
+## Add a column of predictions from the model in our US state totals dataframe: (at this time our model is 
+# predicting deaths per thousand using just one independent variable =population)
+US_state_totals<- US_state_totals %>% 
+  mutate(pred = predict(mod2))
+
+## Lets plot out our predictions against actual values and see how it looks
+US_state_totals %>% ggplot() +
+  geom_point(aes(x = population, y = deaths_per_thou), color = "blue") + # Actual values in blue
+  geom_point(aes(x = population, y = pred), color = "red") # Predicted values in red
+```
+
+
+* What if we did multiple predictors to try and predict deaths per thousand?
+
+
+```{r model_3}
+mod3 <- lm(deaths_per_thou ~ cases^2-(population), data = US_state_totals)
+summary(mod3)
+```
+
+
+```{r plot_model_3}
+US_state_totals<- US_state_totals %>% 
+  mutate(pred = predict(mod3))
+
+## Lets plot out our predictions against actual values and see how it looks
+US_state_totals %>% ggplot() +
+  geom_point(aes(x = population, y = deaths_per_thou), color = "blue") + # Actual values in blue
+  geom_point(aes(x = population, y = pred), color = "red") # Predicted values in red
+```
+
+* Now to have some fun with building an accurate but missleading model:
+
+```{r model_4}
+mod4 <- lm(deaths_per_thou ~ deaths^2*cases*sqrt(population), data = US_state_totals)
+summary(mod4)
+
+```
+* That standard error is much lower than the previous models and our $R^2$ is pretty high! 
+* It is a ridiculous coeffiecent I concocted to achieve this and it would not be good to do in the real world.
+```{r plot_model_4}
+US_state_totals<- US_state_totals %>% 
+  mutate(pred = predict(mod4))
+
+## Lets plot out our predictions against actual values and see how it looks
+US_state_totals %>% ggplot() +
+  geom_point(aes(x = population, y = deaths_per_thou), color = "blue") + # Actual values in blue
+  geom_point(aes(x = population, y = pred), color = "red") # Predicted values in red
+
+```
+
+## Conclusion
+* Through analysis I found that the deaths and cases are diverging as time goes on, 
+the virus is becoming less lethal for I am sure many reasons.
+* Many regions are having widely varied data right now. This could be because of reporting processes varying by 
+region or merely how they are responding to the pandemic.
+* The model above is actually a fluke. It predicts quite accurately but to be honest I tried many combinations 
+of those variables to make it look like that only to make the point that you can misslead yourself or others 
+by manipulating the data with formulas and including variables that are actually causal.
+* How to actually improve the model?
+* What if we added data like population density etc? I wonder if population density would affect the deaths per thousand.
+* I will save this for a later date but I am sure with the right variables we could predict very accurately.
+
+### Thank you for reading and I hope you stay safe out there!
