@@ -14,7 +14,7 @@ knitr::opts_chunk$set(echo = TRUE)
 # Is the Covid-19 Virus Becoming Less Deadly?
 
 
-## Goals
+## Goals 
 
 * Analyze recent Covid-19 cases and death's data from recent years to present.
   * Look at global, US, and individual states.  
